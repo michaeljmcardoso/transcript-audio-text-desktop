@@ -1,0 +1,13 @@
+--find-links https://download.pytorch.org/whl/cpu/torch/
+--find-links https://download.pytorch.org/whl/cpu/torchaudio/
+--find-links https://download.pytorch.org/whl/cpu/torchvision/
+
+torch==2.8.0+cpu
+torchaudio==2.8.0+cpu
+torchvision==0.23.0+cpu
+PySide6>=6.8,<7
+whisperx>=3.8.6,<4
+python-dotenv>=1.0,<2
+imageio-ffmpeg>=0.5.1,<1
+google-genai>=1.0.0,<3
+python-docx>=1.1.2,<2
