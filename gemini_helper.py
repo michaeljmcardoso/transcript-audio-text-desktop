@@ -181,6 +181,11 @@ def _extrair_nomes_heuristicos(transcricao: str) -> dict[str, str]:
     return resultado
 
 
+def sugerir_nomes_locais(transcricao: str, max_chars: int = 12000) -> dict[str, str]:
+    """Sugere nomes sem rede, usando apenas apresentações explícitas na transcrição."""
+    return _extrair_nomes_heuristicos((transcricao or "")[:max_chars])
+
+
 def detectar_nomes_falantes(
     transcricao: str,
     api_key: str,
@@ -215,24 +220,50 @@ def detectar_nomes_falantes(
     try:
         client = genai.Client(api_key=chave)
         prompt = PROMPT_TEMPLATE.format(transcricao=texto)
-        response = client.models.generate_content(
+        chat = client.chats.create(
             model=model,
-            contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.0,
                 response_mime_type="application/json",
             ),
         )
+        response = chat.send_message(prompt)
     except Exception as e:
-        if "UNAUTHENTICATED" in str(e) or "401" in str(e) or "ACCESS_TOKEN_TYPE_UNSUPPORTED" in str(e):
+        error_message = str(e)
+        if (
+            "UNAUTHENTICATED" in error_message
+            or "401" in error_message
+            or "ACCESS_TOKEN_TYPE_UNSUPPORTED" in error_message
+        ):
             raise GeminiRequestError(
                 "Credenciais de autenticação inválidas para o Gemini. "
                 "Use uma API key ativa do Google AI Studio (não um token OAuth). "
                 "Gere ou confira a chave em https://aistudio.google.com/app/apikey",
                 chaves_heuristicas,
             ) from e
+        if "404" in error_message or "NOT_FOUND" in error_message:
+            recommendation = re.search(
+                r"use\s+models/([\w.-]+)",
+                error_message,
+                flags=re.IGNORECASE,
+            )
+            message = (
+                f"O Gemini não encontrou o modelo '{model}' (404). "
+                "Confira se o identificador ainda está disponível para sua API key."
+            )
+            if recommendation:
+                message += (
+                    f" A resposta da API recomenda '{recommendation.group(1)}'."
+                )
+            raise GeminiRequestError(message, chaves_heuristicas) from e
+        if "503" in error_message or "UNAVAILABLE" in error_message:
+            raise GeminiRequestError(
+                f"O Gemini está temporariamente indisponível para o modelo '{model}' "
+                "(503), possivelmente por alta demanda. Tente novamente mais tarde.",
+                chaves_heuristicas,
+            ) from e
         raise GeminiRequestError(
-            f"Erro ao consultar o Gemini: {e}",
+            f"Erro ao consultar o Gemini: {error_message}",
             chaves_heuristicas,
         ) from e
 

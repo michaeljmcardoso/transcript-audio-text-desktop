@@ -52,6 +52,11 @@ que o texto da transcrição (limitado a 12.000 caracteres) será enviado à API
 Google usando a API key fornecida pelo próprio usuário. A chave também não é
 armazenada.
 
+Após a diarização, o aplicativo também preenche sugestões locais quando encontra
+apresentações explícitas dos falantes na transcrição. Essas sugestões não usam a
+internet e podem ser revisadas ou editadas nos campos de nomes. A consulta ao
+Gemini continua opcional.
+
 ## Gerar o pacote Linux
 
 Execute em um ambiente Linux com as dependências de build instaladas:

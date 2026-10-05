@@ -25,10 +25,174 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from gemini_helper import GeminiRequestError, detectar_nomes_falantes
+from gemini_helper import (
+    GeminiRequestError,
+    detectar_nomes_falantes,
+    sugerir_nomes_locais,
+)
 from transcript_formatter import format_transcript_by_speaker, transcript_to_docx
 
 AUDIO_EXTENSIONS = "Audio (*.flac *.m4a *.mp3 *.mp4 *.ogg *.opus *.wav *.webm)"
+APP_STYLESHEET = """
+QMainWindow {
+    background-color: #F2F6FA;
+}
+QWidget {
+    color: #233547;
+    font-family: "Noto Sans";
+    font-size: 10pt;
+}
+QGroupBox {
+    background-color: #FFFFFF;
+    border: 1px solid #D8E2EB;
+    border-radius: 9px;
+    margin-top: 12px;
+    padding: 12px 10px 10px;
+    font-weight: 600;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 5px;
+    color: #31536A;
+}
+QLineEdit, QComboBox, QTextEdit {
+    background-color: #FFFFFF;
+    border: 1px solid #CAD7E2;
+    border-radius: 6px;
+    padding: 6px 8px;
+    selection-background-color: #168C91;
+    selection-color: #FFFFFF;
+}
+QLineEdit:focus, QComboBox:focus, QTextEdit:focus {
+    border: 1px solid #168C91;
+}
+QTextEdit {
+    background-color: #F9FBFD;
+}
+QScrollBar:vertical {
+    background-color: #E5EDF3;
+    width: 14px;
+    margin: 2px;
+    border-radius: 7px;
+}
+QScrollBar::handle:vertical {
+    background-color: #8AA6BA;
+    min-height: 32px;
+    border-radius: 6px;
+    margin: 2px;
+}
+QScrollBar::handle:vertical:hover {
+    background-color: #557F99;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+}
+QScrollBar:horizontal {
+    background-color: #E5EDF3;
+    height: 14px;
+    margin: 2px;
+    border-radius: 7px;
+}
+QScrollBar::handle:horizontal {
+    background-color: #8AA6BA;
+    min-width: 32px;
+    border-radius: 6px;
+    margin: 2px;
+}
+QScrollBar::handle:horizontal:hover {
+    background-color: #557F99;
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0;
+}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: none;
+}
+QPushButton {
+    background-color: #E8F0F5;
+    border: 1px solid #D0DDE6;
+    border-radius: 7px;
+    padding: 8px 12px;
+    font-weight: 600;
+}
+QPushButton:hover {
+    background-color: #DCEBF0;
+    border-color: #A9C8D2;
+}
+QPushButton:pressed {
+    background-color: #C9DFE5;
+}
+QPushButton:disabled {
+    background-color: #E9EDF1;
+    border-color: #E0E5E9;
+    color: #8996A2;
+}
+QPushButton#primaryAction {
+    background-color: #167D83;
+    border-color: #167D83;
+    color: #FFFFFF;
+}
+QPushButton#primaryAction:hover {
+    background-color: #126B71;
+}
+QPushButton#exportAction {
+    background-color: #315B78;
+    border-color: #315B78;
+    color: #FFFFFF;
+}
+QPushButton#exportAction:hover {
+    background-color: #274B64;
+}
+QMessageBox {
+    background-color: #FFFFFF;
+    color: #202124;
+}
+QMessageBox QLabel {
+    background-color: transparent;
+    color: #202124;
+}
+QMessageBox QPushButton {
+    background-color: #E8F0F5;
+    border: 1px solid #D0DDE6;
+    color: #202124;
+}
+QTabWidget::pane {
+    background-color: #FFFFFF;
+    border: 1px solid #D8E2EB;
+    border-radius: 7px;
+    top: -1px;
+}
+QTabBar::tab {
+    background-color: #E7EEF4;
+    border: 1px solid #D8E2EB;
+    border-bottom: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 7px 12px;
+    margin-right: 3px;
+}
+QTabBar::tab:selected {
+    background-color: #FFFFFF;
+    color: #167D83;
+    font-weight: 600;
+}
+QProgressBar {
+    background-color: #E1E9EF;
+    border: none;
+    border-radius: 5px;
+    color: #233547;
+    text-align: center;
+    min-height: 14px;
+}
+QProgressBar::chunk {
+    background-color: #20A39E;
+    border-radius: 5px;
+}
+"""
 
 
 class TranscriptionWorker(QThread):
@@ -82,6 +246,7 @@ class GeminiWorker(QThread):
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
+        self.setStyleSheet(APP_STYLESHEET)
         self.setWindowTitle("Transcrição de áudio")
         self.resize(1050, 760)
 
@@ -131,6 +296,7 @@ class MainWindow(QMainWindow):
         root.addWidget(settings)
 
         self.transcribe_button = QPushButton("Transcrever áudio")
+        self.transcribe_button.setObjectName("primaryAction")
         self.transcribe_button.setEnabled(False)
         self.transcribe_button.clicked.connect(self._start_transcription)
         root.addWidget(self.transcribe_button)
@@ -189,7 +355,9 @@ class MainWindow(QMainWindow):
 
         export_row = QHBoxLayout()
         self.docx_button = QPushButton("Baixar por Falante (DOCX)")
+        self.docx_button.setObjectName("exportAction")
         self.timestamps_button = QPushButton("Baixar Timestamps (TXT)")
+        self.timestamps_button.setObjectName("exportAction")
         self.docx_button.clicked.connect(self._save_docx)
         self.timestamps_button.clicked.connect(self._save_timestamps)
         for button in (self.docx_button, self.timestamps_button):
@@ -249,10 +417,23 @@ class MainWindow(QMainWindow):
         self.result = result
         self.suggestions = {}
         self._build_speaker_editor()
+        local_suggestions = sugerir_nomes_locais(result["full_text"])
+        self._apply_suggestions(local_suggestions)
         self._refresh_outputs()
         self.suggest_button.setEnabled(True)
         self.docx_button.setEnabled(True)
         self.timestamps_button.setEnabled(True)
+        if local_suggestions:
+            self.suggestion_status.setText(
+                f"Foram encontradas localmente {len(local_suggestions)} sugestão(ões) "
+                "explícitas, sem enviar dados. Revise ou ajuste os nomes nos campos "
+                "da seção “Revisão dos falantes”."
+            )
+        else:
+            self.suggestion_status.setText(
+                "Nenhuma apresentação explícita foi identificada localmente. "
+                "Você pode preencher os nomes manualmente ou solicitar sugestões ao Gemini."
+            )
         self.status_label.setText(
             f"Concluído. Idioma: {result['language']}. "
             f"Falantes identificados: {len(result['speakers'])}."
@@ -352,27 +533,34 @@ class MainWindow(QMainWindow):
         self.gemini_worker.start()
 
     def _apply_suggestions(self, suggestions: dict[str, str]) -> int:
+        previous_suggestions = self.suggestions
         self.suggestions = suggestions
         count = 0
         for speaker, name in suggestions.items():
             edit = self.name_edits.get(speaker)
-            if name and edit and not edit.text().strip():
+            current_name = edit.text().strip() if edit else ""
+            if name and edit and (
+                not current_name or current_name == previous_suggestions.get(speaker)
+            ):
                 edit.setText(name)
                 count += 1
         return count
 
     def _suggestions_succeeded(self, suggestions: dict) -> None:
         count = self._apply_suggestions(suggestions)
+        found = sum(bool(name) for name in suggestions.values())
         self.suggestion_status.setText(
-            f"Gemini sugeriu {count} nome(s). Confira e edite antes de exportar."
+            f"Gemini encontrou {found} sugestão(ões); {count} aplicada(s). "
+            "Confira os nomes antes de exportar; alterações manuais foram preservadas."
         )
 
     def _suggestions_failed(self, message: str, local_suggestions: dict) -> None:
         if local_suggestions:
-            count = self._apply_suggestions(local_suggestions)
+            self._apply_suggestions(local_suggestions)
+            count = sum(bool(name) for name in local_suggestions.values())
             self.suggestion_status.setText(
-                f"Não foi possível consultar o Gemini: {message}\n"
-                f"Foram encontradas localmente {count} sugestão(ões) explícitas; revise-as."
+                f"{message}\nAs sugestões locais ({count}) continuam nos campos editáveis. "
+                "Confira ou ajuste os nomes manualmente."
             )
             return
         self.suggestion_status.setText(f"Erro ao consultar o Gemini: {message}")
