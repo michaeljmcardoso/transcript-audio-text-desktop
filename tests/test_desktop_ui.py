@@ -62,6 +62,11 @@ class DesktopUiTests(unittest.TestCase):
         self.assertFalse(self.window.suggest_button.isEnabled())
         self.assertFalse(self.window.gemini_key_edit.text())
 
+    def test_export_buttons_offer_speaker_docx_and_timestamps_txt(self):
+        self.assertEqual(self.window.docx_button.text(), "Baixar por Falante (DOCX)")
+        self.assertEqual(self.window.timestamps_button.text(), "Baixar Timestamps (TXT)")
+        self.assertFalse(hasattr(self.window, "txt_button"))
+
 
 if __name__ == "__main__":
     unittest.main()

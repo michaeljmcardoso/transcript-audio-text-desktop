@@ -14,6 +14,7 @@ fi
   --name TranscricaoDesktop \
   --collect-all whisperx \
   --collect-all pyannote.audio \
+  --copy-metadata torchcodec \
   --collect-binaries imageio_ffmpeg \
   --exclude-module triton \
   --hidden-import transcriber \

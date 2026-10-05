@@ -188,13 +188,11 @@ class MainWindow(QMainWindow):
         root.addWidget(gemini_group)
 
         export_row = QHBoxLayout()
-        self.docx_button = QPushButton("Exportar DOCX…")
-        self.txt_button = QPushButton("Exportar texto por falante…")
-        self.timestamps_button = QPushButton("Exportar timestamps…")
+        self.docx_button = QPushButton("Baixar por Falante (DOCX)")
+        self.timestamps_button = QPushButton("Baixar Timestamps (TXT)")
         self.docx_button.clicked.connect(self._save_docx)
-        self.txt_button.clicked.connect(self._save_speaker_text)
         self.timestamps_button.clicked.connect(self._save_timestamps)
-        for button in (self.docx_button, self.txt_button, self.timestamps_button):
+        for button in (self.docx_button, self.timestamps_button):
             button.setEnabled(False)
             export_row.addWidget(button)
         root.addLayout(export_row)
@@ -254,7 +252,6 @@ class MainWindow(QMainWindow):
         self._refresh_outputs()
         self.suggest_button.setEnabled(True)
         self.docx_button.setEnabled(True)
-        self.txt_button.setEnabled(True)
         self.timestamps_button.setEnabled(True)
         self.status_label.setText(
             f"Concluído. Idioma: {result['language']}. "
@@ -409,13 +406,6 @@ class MainWindow(QMainWindow):
             transcript_to_docx(self.speaker_text.toPlainText()),
         )
 
-    def _save_speaker_text(self) -> None:
-        self._save_file(
-            "_texto_por_falante.txt",
-            "Arquivo de texto (*.txt)",
-            self.speaker_text.toPlainText(),
-        )
-
     def _save_timestamps(self) -> None:
         if not self.result:
             return
@@ -435,7 +425,6 @@ class MainWindow(QMainWindow):
             widget.clear()
         self.suggest_button.setEnabled(False)
         self.docx_button.setEnabled(False)
-        self.txt_button.setEnabled(False)
         self.timestamps_button.setEnabled(False)
         self.suggestion_status.setText(
             "A chave não será salva. A transcrição só será enviada ao Google "

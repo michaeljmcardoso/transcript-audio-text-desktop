@@ -66,7 +66,9 @@ preservando sua estrutura; não distribua apenas o binário `TranscricaoDesktop`
 O pacote Linux deve ser compilado em Linux. Para Windows, será necessário
 executar um build equivalente em Windows; o PyInstaller não é cross-compiler.
 
-Para validar os imports de inferência no pacote:
+Antes de distribuir, valide os imports de inferência no pacote. O comando
+detecta dependências cujo código foi empacotado, mas cujos metadados de versão
+não foram incluídos:
 
 ```bash
 dist/TranscricaoDesktop/TranscricaoDesktop --check-runtime
