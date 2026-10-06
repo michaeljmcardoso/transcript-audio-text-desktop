@@ -14,8 +14,8 @@ Hugging Face. O pacote WhisperX também contém seu pequeno modelo VAD de
 
 - Python 3.10–3.12 de 64 bits.
 - Conexão com a internet no primeiro uso para baixar os modelos do WhisperX.
-- Token do Hugging Face com acesso aos modelos necessários pelo pyannote para
-  diarização.
+- Token do Hugging Face com permissão `Read` e acesso aos modelos necessários
+  pelo pyannote para diarização.
 - Para sugestões via Gemini, uma API key do Google AI Studio (opcional).
 
 ## Executar durante o desenvolvimento
@@ -43,9 +43,28 @@ python main.py
 
 ## Credenciais
 
-Informe o token do Hugging Face na janela do aplicativo para habilitar a
-diarização. A chave é mantida apenas na memória durante a execução e não é
-gravada no repositório nem no executável.
+Defina a variável de ambiente `HF_TOKEN` antes de iniciar o aplicativo. Crie
+um token com permissão `Read` em
+[Hugging Face](https://huggingface.co/settings/tokens) e aceite o acesso aos
+modelos pyannote necessários para diarização. O token não é salvo pelo
+aplicativo nem incluído no executável.
+
+No Linux, inicie pelo terminal:
+
+```bash
+export HF_TOKEN="hf_seu_token"
+./dist/TranscricaoDesktop/TranscricaoDesktop
+```
+
+No Windows PowerShell:
+
+```powershell
+$env:HF_TOKEN = "hf_seu_token"
+.\dist\TranscricaoDesktop\TranscricaoDesktop.exe
+```
+
+O botão “Cancelar transcrição” solicita o cancelamento sem bloquear a janela.
+A operação para após a etapa de inferência que já estiver em andamento.
 
 A sugestão de nomes pelo Gemini é opcional. Ao solicitá-la, o aplicativo avisa
 que o texto da transcrição (limitado a 12.000 caracteres) será enviado à API do

@@ -21,6 +21,10 @@ WHISPER_MODEL = "large-v3"      # alta precisão (lento na CPU!)
 BATCH_SIZE = 4                  # baixo para economizar RAM
 
 
+class TranscriptionCancelled(Exception):
+    """Sinaliza o cancelamento cooperativo do processamento."""
+
+
 def _fmt_time(seconds: float) -> str:
     """Converte segundos para HH:MM:SS."""
     h = int(seconds // 3600)
@@ -36,6 +40,7 @@ def transcribe_and_diarize(
     max_speakers: int | None = None,
     language: str | None = None,
     progress_callback: Callable[[str, float], None] | None = None,
+    cancellation_callback: Callable[[], bool] | None = None,
 ):
     """
     Transcreve o áudio, faz alinhamento e diarização.
@@ -49,6 +54,10 @@ def transcribe_and_diarize(
     if not hf_token:
         raise ValueError("Token do Hugging Face é obrigatório para a diarização.")
 
+    def check_cancelled() -> None:
+        if cancellation_callback and cancellation_callback():
+            raise TranscriptionCancelled("Transcrição cancelada pelo usuário.")
+
     audio_path = str(Path(audio_path).resolve())
 
     def log(msg: str, progress: float):
@@ -58,12 +67,15 @@ def transcribe_and_diarize(
             print(msg)
 
     # ---------- 1. Carregar áudio ----------
+    check_cancelled()
     ensure_ffmpeg_available()
     log("🎧 Carregando áudio...", 0.05)
     audio = whisperx.load_audio(audio_path)
+    check_cancelled()
     log("✅ Áudio carregado.", 0.1)
 
     # ---------- 2. Transcrição ----------
+    check_cancelled()
     log(
         f"📝 Transcrevendo com modelo '{WHISPER_MODEL}' (isso pode demorar um pouco)...",
         0.12,
@@ -74,16 +86,20 @@ def transcribe_and_diarize(
         compute_type=COMPUTE_TYPE,
         language=language,
     )
+    check_cancelled()
     result = model.transcribe(audio, batch_size=BATCH_SIZE, language=language)
+    check_cancelled()
     detected_lang = result.get("language", language or "?")
     log(f"✅ Transcrição concluída. Idioma detectado: {detected_lang}", 0.52)
 
     # ---------- 3. Alinhamento (timestamps por palavra) ----------
-    log("🎯 Alinhando timestamps...", 0.55)
+    check_cancelled()
+    log("🎯 Alinhando marcas de tempo...", 0.55)
     try:
         model_a, metadata = whisperx.load_align_model(
             language_code=detected_lang, device=DEVICE
         )
+        check_cancelled()
         result = whisperx.align(
             result["segments"],
             model_a,
@@ -92,7 +108,10 @@ def transcribe_and_diarize(
             DEVICE,
             return_char_alignments=False,
         )
+        check_cancelled()
         log("✅ Alinhamento concluído.", 0.7)
+    except TranscriptionCancelled:
+        raise
     except Exception as e:
         log(
             f"⚠️ Alinhamento falhou ({e}). Prosseguindo sem alinhamento.",
@@ -100,6 +119,7 @@ def transcribe_and_diarize(
         )
 
     # ---------- 4. Diarização ----------
+    check_cancelled()
     log("🗣️ Identificando falantes (diarização)...", 0.72)
     diarize_model = DiarizationPipeline(
         token=hf_token,
@@ -110,17 +130,21 @@ def transcribe_and_diarize(
         min_speakers=min_speakers,
         max_speakers=max_speakers,
     )
+    check_cancelled()
     log("✅ Diarização concluída.", 0.93)
 
     # ---------- 5. Mesclar transcrição + diarização ----------
+    check_cancelled()
     log("🔗 Mesclando transcrição com falantes...", 0.95)
     result = whisperx.assign_word_speakers(diarize_segments, result)
+    check_cancelled()
     log("✅ Falantes associados à transcrição.", 0.98)
 
     # ---------- 6. Formatar saída ----------
     segments = []
     speakers_set = set()
     for seg in result["segments"]:
+        check_cancelled()
         spk = seg.get("speaker", "DESCONHECIDO")
         speakers_set.add(spk)
         segments.append({
@@ -148,6 +172,7 @@ def transcribe_and_diarize(
     if buffer:
         lines.append(f"[{current_speaker}] {' '.join(buffer).strip()}")
 
+    check_cancelled()
     full_text = "\n\n".join(lines)
 
     log("🎉 Processamento concluído!", 1.0)

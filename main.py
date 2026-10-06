@@ -1,6 +1,7 @@
 """Desktop interface for local WhisperX transcription."""
 from __future__ import annotations
 
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -33,6 +34,8 @@ from gemini_helper import (
 from transcript_formatter import format_transcript_by_speaker, transcript_to_docx
 
 AUDIO_EXTENSIONS = "Audio (*.flac *.m4a *.mp3 *.mp4 *.ogg *.opus *.wav *.webm)"
+# Teste local apenas: preencher este valor embute o token no executável.
+HF_TOKEN_FOR_TEST = ""
 APP_STYLESHEET = """
 QMainWindow {
     background-color: #F2F6FA;
@@ -66,6 +69,13 @@ QLineEdit, QComboBox, QTextEdit {
 }
 QLineEdit:focus, QComboBox:focus, QTextEdit:focus {
     border: 1px solid #168C91;
+}
+QComboBox QAbstractItemView {
+    background-color: #FFFFFF;
+    border: 1px solid #CAD7E2;
+    color: #202124;
+    selection-background-color: #168C91;
+    selection-color: #FFFFFF;
 }
 QTextEdit {
     background-color: #F9FBFD;
@@ -160,6 +170,29 @@ QMessageBox QPushButton {
     border: 1px solid #D0DDE6;
     color: #202124;
 }
+QMenu {
+    background-color: #FFFFFF;
+    border: 1px solid #CAD7E2;
+    color: #202124;
+    padding: 4px;
+}
+QMenu::item {
+    background-color: transparent;
+    color: #202124;
+    padding: 6px 24px 6px 10px;
+}
+QMenu::item:selected {
+    background-color: #168C91;
+    color: #FFFFFF;
+}
+QMenu::item:disabled {
+    color: #737B83;
+}
+QMenu::separator {
+    background-color: #D8E2EB;
+    height: 1px;
+    margin: 4px 6px;
+}
 QTabWidget::pane {
     background-color: #FFFFFF;
     border: 1px solid #D8E2EB;
@@ -199,6 +232,7 @@ class TranscriptionWorker(QThread):
     progress = Signal(str, float)
     succeeded = Signal(dict)
     failed = Signal(str)
+    cancelled = Signal()
 
     def __init__(self, audio_path: str, hf_token: str, language: str | None):
         super().__init__()
@@ -206,17 +240,23 @@ class TranscriptionWorker(QThread):
         self.hf_token = hf_token
         self.language = language
 
+    def request_cancel(self) -> None:
+        self.requestInterruption()
+
     def run(self) -> None:
         try:
-            from transcriber import transcribe_and_diarize
+            from transcriber import TranscriptionCancelled, transcribe_and_diarize
 
             result = transcribe_and_diarize(
                 audio_path=self.audio_path,
                 hf_token=self.hf_token,
                 language=self.language,
                 progress_callback=self.progress.emit,
+                cancellation_callback=self.isInterruptionRequested,
             )
             self.succeeded.emit(result)
+        except TranscriptionCancelled:
+            self.cancelled.emit()
         except Exception:
             self.failed.emit(traceback.format_exc())
 
@@ -247,7 +287,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setStyleSheet(APP_STYLESHEET)
-        self.setWindowTitle("Transcrição de áudio")
+        self.setWindowTitle("Transcript Audio Text")
         self.resize(1050, 760)
 
         self.audio_path: Path | None = None
@@ -256,6 +296,8 @@ class MainWindow(QMainWindow):
         self.suggestions: dict[str, str] = {}
         self.transcription_worker: TranscriptionWorker | None = None
         self.gemini_worker: GeminiWorker | None = None
+        self._close_when_workers_idle = False
+        self._cancel_requested = False
 
         self._build_ui()
 
@@ -288,18 +330,19 @@ class MainWindow(QMainWindow):
             self.language_combo.addItem(name, code)
         settings_form.addRow("Idioma:", self.language_combo)
 
-        self.hf_token_edit = QLineEdit()
-        self.hf_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.hf_token_edit.setPlaceholderText("Token do Hugging Face (necessário para diarização)")
-        settings_form.addRow("Hugging Face:", self.hf_token_edit)
-
         root.addWidget(settings)
 
         self.transcribe_button = QPushButton("Transcrever áudio")
         self.transcribe_button.setObjectName("primaryAction")
         self.transcribe_button.setEnabled(False)
         self.transcribe_button.clicked.connect(self._start_transcription)
-        root.addWidget(self.transcribe_button)
+        self.cancel_button = QPushButton("Cancelar transcrição")
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.clicked.connect(self._request_transcription_cancel)
+        transcription_actions = QHBoxLayout()
+        transcription_actions.addWidget(self.transcribe_button, 1)
+        transcription_actions.addWidget(self.cancel_button)
+        root.addLayout(transcription_actions)
 
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
@@ -325,7 +368,7 @@ class MainWindow(QMainWindow):
 
         self.timestamp_text = QTextEdit()
         self.timestamp_text.setReadOnly(True)
-        self.result_tabs.addTab(self.timestamp_text, "Com timestamps")
+        self.result_tabs.addTab(self.timestamp_text, "Com marcas de tempo")
 
         self.plain_text = QTextEdit()
         self.plain_text.setReadOnly(True)
@@ -356,7 +399,7 @@ class MainWindow(QMainWindow):
         export_row = QHBoxLayout()
         self.docx_button = QPushButton("Baixar por Falante (DOCX)")
         self.docx_button.setObjectName("exportAction")
-        self.timestamps_button = QPushButton("Baixar Timestamps (TXT)")
+        self.timestamps_button = QPushButton("Baixar Marcas de Tempo (TXT)")
         self.timestamps_button.setObjectName("exportAction")
         self.docx_button.clicked.connect(self._save_docx)
         self.timestamps_button.clicked.connect(self._save_timestamps)
@@ -380,24 +423,26 @@ class MainWindow(QMainWindow):
         self.audio_label.setText(filename)
         self.transcribe_button.setEnabled(True)
         self._clear_result()
-        self.status_label.setText("Arquivo selecionado. Informe o token e inicie a transcrição.")
+        self._set_status("Arquivo selecionado. Inicie a transcrição.")
 
     def _start_transcription(self) -> None:
         if self.audio_path is None:
             return
-        hf_token = self.hf_token_edit.text().strip()
+        hf_token = HF_TOKEN_FOR_TEST.strip() or os.environ.get("HF_TOKEN", "").strip()
         if not hf_token:
             QMessageBox.warning(
                 self,
-                "Token necessário",
-                "Informe seu token do Hugging Face para habilitar a diarização.",
+                "Configuração necessária",
+                "Defina a variável de ambiente HF_TOKEN com seu token do Hugging Face "
+                "e reinicie o aplicativo.",
             )
             return
 
         self._clear_result()
+        self._cancel_requested = False
         self._set_busy(True)
         self.progress.setValue(0)
-        self.status_label.setText("Iniciando transcrição…")
+        self._set_status("Iniciando transcrição…")
         self.transcription_worker = TranscriptionWorker(
             str(self.audio_path),
             hf_token,
@@ -406,11 +451,48 @@ class MainWindow(QMainWindow):
         self.transcription_worker.progress.connect(self._update_progress)
         self.transcription_worker.succeeded.connect(self._transcription_succeeded)
         self.transcription_worker.failed.connect(self._worker_failed)
+        self.transcription_worker.cancelled.connect(self._transcription_cancelled)
         self.transcription_worker.finished.connect(lambda: self._set_busy(False))
+        self.transcription_worker.finished.connect(self._finish_pending_close)
         self.transcription_worker.start()
 
-    def _update_progress(self, message: str, amount: float) -> None:
+    def _set_status(self, message: str, *, bold: bool = False) -> None:
+        status_font = self.status_label.font()
+        status_font.setBold(bold)
+        self.status_label.setFont(status_font)
         self.status_label.setText(message)
+
+    def _request_transcription_cancel(self) -> None:
+        worker = self.transcription_worker
+        if worker is None or not worker.isRunning():
+            return
+        worker.request_cancel()
+        self._cancel_requested = True
+        self.cancel_button.setEnabled(False)
+        self._set_status(
+            "Cancelamento solicitado. A etapa atual será concluída antes de parar."
+        )
+
+    def _transcription_cancelled(self) -> None:
+        self._cancel_requested = False
+        self._set_status("Transcrição cancelada; nenhum resultado parcial foi salvo.")
+        self.progress.setValue(0)
+
+    def _finish_pending_close(self) -> None:
+        if not self._close_when_workers_idle:
+            return
+        if any(
+            worker is not None and worker.isRunning()
+            for worker in (self.transcription_worker, self.gemini_worker)
+        ):
+            return
+        self._close_when_workers_idle = False
+        self.close()
+
+    def _update_progress(self, message: str, amount: float) -> None:
+        if self._cancel_requested:
+            return
+        self._set_status(message)
         self.progress.setValue(max(0, min(100, round(amount * 100))))
 
     def _transcription_succeeded(self, result: dict) -> None:
@@ -434,14 +516,15 @@ class MainWindow(QMainWindow):
                 "Nenhuma apresentação explícita foi identificada localmente. "
                 "Você pode preencher os nomes manualmente ou solicitar sugestões ao Gemini."
             )
-        self.status_label.setText(
+        self._set_status(
             f"Concluído. Idioma: {result['language']}. "
-            f"Falantes identificados: {len(result['speakers'])}."
+            f"Falantes identificados: {len(result['speakers'])}.",
+            bold=True,
         )
         self.progress.setValue(100)
 
     def _worker_failed(self, details: str) -> None:
-        self.status_label.setText("A operação falhou.")
+        self._set_status("A operação falhou.")
         QMessageBox.critical(self, "Erro no processamento", details)
 
     def _build_speaker_editor(self) -> None:
@@ -530,6 +613,7 @@ class MainWindow(QMainWindow):
         self.gemini_worker.finished.connect(
             lambda: self.suggest_button.setEnabled(self.result is not None)
         )
+        self.gemini_worker.finished.connect(self._finish_pending_close)
         self.gemini_worker.start()
 
     def _apply_suggestions(self, suggestions: dict[str, str]) -> int:
@@ -585,7 +669,7 @@ class MainWindow(QMainWindow):
         except OSError as error:
             QMessageBox.critical(self, "Erro ao salvar", str(error))
             return
-        self.status_label.setText(f"Arquivo salvo: {filename}")
+        self._set_status(f"Arquivo salvo: {filename}")
 
     def _save_docx(self) -> None:
         self._save_file(
@@ -621,32 +705,45 @@ class MainWindow(QMainWindow):
 
     def _set_busy(self, busy: bool) -> None:
         self.transcribe_button.setEnabled(not busy and self.audio_path is not None)
+        self.cancel_button.setEnabled(busy)
         self.browse_button.setEnabled(not busy)
         self.language_combo.setEnabled(not busy)
-        self.hf_token_edit.setEnabled(not busy)
 
     def closeEvent(self, event) -> None:
-        active_workers = (
-            worker
-            for worker in (self.transcription_worker, self.gemini_worker)
-            if worker is not None and worker.isRunning()
+        active_transcription = (
+            self.transcription_worker is not None
+            and self.transcription_worker.isRunning()
         )
-        if any(True for _ in active_workers):
-            answer = QMessageBox.question(
-                self,
-                "Processamento em andamento",
-                "Uma operação ainda está em andamento. Deseja aguardar o término?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes,
-            )
-            if answer == QMessageBox.StandardButton.Yes:
-                for worker in (self.transcription_worker, self.gemini_worker):
-                    if worker is not None and worker.isRunning():
-                        worker.wait()
-            else:
-                event.ignore()
-                return
-        event.accept()
+        active_gemini = (
+            self.gemini_worker is not None and self.gemini_worker.isRunning()
+        )
+        if not active_transcription and not active_gemini:
+            event.accept()
+            return
+
+        if self._close_when_workers_idle:
+            event.ignore()
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Processamento em andamento",
+            "Deseja cancelar a transcrição e fechar quando a etapa atual terminar?"
+            if active_transcription
+            else "A solicitação ao Gemini ainda está em andamento. Fechar quando ela terminar?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            event.ignore()
+            return
+
+        self._close_when_workers_idle = True
+        if active_transcription:
+            self._request_transcription_cancel()
+        else:
+            self._set_status("Fechando após a resposta do Gemini…")
+        event.ignore()
 
 
 def main() -> int:
